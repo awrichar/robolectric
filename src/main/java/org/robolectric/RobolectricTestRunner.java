@@ -2,6 +2,8 @@ package org.robolectric;
 
 import android.app.Application;
 import android.os.Build;
+
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.annotation.Annotation;
@@ -59,12 +61,12 @@ import static org.fest.reflect.core.Reflection.type;
  * provide a simulation of the Android runtime environment.
  */
 public class RobolectricTestRunner extends BlockJUnit4ClassRunner {
-  private static final MavenCentral MAVEN_CENTRAL = new MavenCentral();
   private static final Map<Class<? extends RobolectricTestRunner>, EnvHolder> envHoldersByTestRunner = new HashMap<Class<? extends RobolectricTestRunner>, EnvHolder>();
   private static Map<Pair<AndroidManifest, SdkConfig>, ResourceLoader> resourceLoadersByManifestAndConfig = new HashMap<Pair<AndroidManifest, SdkConfig>, ResourceLoader>();
   private static ShadowMap mainShadowMap;
   private final EnvHolder envHolder;
   private TestLifecycle<Application> testLifecycle;
+  private MavenCentral mavenCentral;
 
   static {
     new SecureRandom(); // this starts up the Poller SunPKCS11-Darwin thread early, outside of any Robolectric classloader
@@ -110,6 +112,19 @@ public class RobolectricTestRunner extends BlockJUnit4ClassRunner {
     }
   }
 
+  protected MavenCentral getMavenCentral() {
+    if (mavenCentral == null) {
+      if (Boolean.parseBoolean(System.getProperty("robolectric.offline"))) {
+        String dependencyDir = System.getProperty("robolectric.dependency.dir", ".");
+        mavenCentral = new MavenOffline(new File(dependencyDir));
+      } else {
+        mavenCentral = new MavenCentral();
+      }
+    }
+
+    return mavenCentral;
+  }
+
   public SdkEnvironment createSdkEnvironment(SdkConfig sdkConfig) {
     Setup setup = createSetup();
     ClassLoader robolectricClassLoader = createRobolectricClassLoader(setup, sdkConfig);
@@ -142,7 +157,7 @@ public class RobolectricTestRunner extends BlockJUnit4ClassRunner {
   }
 
   protected ClassLoader createRobolectricClassLoader(Setup setup, SdkConfig sdkConfig) {
-    URL[] urls = MAVEN_CENTRAL.getLocalArtifactUrls(this, sdkConfig.getSdkClasspathDependencies());
+    URL[] urls = getMavenCentral().getLocalArtifactUrls(this, sdkConfig.getSdkClasspathDependencies());
     return new AsmInstrumentingClassLoader(setup, urls);
   }
 
@@ -232,7 +247,7 @@ public class RobolectricTestRunner extends BlockJUnit4ClassRunner {
           Class<?> versionClass = sdkEnvironment.bootstrappedClass(Build.VERSION.class);
           staticField("SDK_INT").ofType(int.class).in(versionClass).set(sdkVersion);
 
-          ResourceLoader systemResourceLoader = sdkEnvironment.getSystemResourceLoader(MAVEN_CENTRAL, RobolectricTestRunner.this);
+          ResourceLoader systemResourceLoader = sdkEnvironment.getSystemResourceLoader(getMavenCentral(), RobolectricTestRunner.this);
           setUpApplicationState(bootstrappedMethod, parallelUniverseInterface, strictI18n, systemResourceLoader, appManifest, config);
           testLifecycle.beforeTest(bootstrappedMethod);
         } catch (Exception e) {
